@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Home, Users, Wallet, Plus, TrendingUp, TrendingDown, DollarSign, PieChart, LogOut, Crown, AlertCircle, X, Calendar } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Home, Users, Wallet, Plus, TrendingUp, TrendingDown, DollarSign, PieChart, LogOut, Crown, AlertCircle, X, Calendar, Edit2, Trash2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 type TabType = "home" | "grupos" | "gastos";
@@ -22,7 +23,16 @@ interface CategoriaAgrupada {
   icon: string;
 }
 
+interface Grupo {
+  id: string;
+  usuarioCriadorId: string;
+  nome: string;
+  descricao: string;
+  dataCriacao: string;
+}
+
 export default function RachaFacil() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>("home");
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -33,8 +43,9 @@ export default function RachaFacil() {
 
   const checkUser = async () => {
     if (!isSupabaseConfigured) {
+      console.log("Supabase não configurado, redirecionando...");
       setLoading(false);
-      window.location.href = "/login";
+      router.push("/login");
       return;
     }
 
@@ -42,27 +53,29 @@ export default function RachaFacil() {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
+        console.log("Usuário não autenticado, redirecionando...");
         setLoading(false);
-        window.location.href = "/login";
+        router.push("/login");
         return;
       }
       
+      console.log("Usuário autenticado:", user.email);
       setUser(user);
       setLoading(false);
     } catch (error) {
       console.error("Erro ao verificar usuário:", error);
       setLoading(false);
-      window.location.href = "/login";
+      router.push("/login");
     }
   };
 
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-      window.location.href = "/login";
+      router.push("/login");
     } catch (error) {
       console.error("Erro ao fazer logout:", error);
-      window.location.href = "/login";
+      router.push("/login");
     }
   };
 
@@ -81,8 +94,7 @@ export default function RachaFacil() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Redirecionando...</p>
+          <p className="text-gray-600">Redirecionando para login...</p>
         </div>
       </div>
     );
@@ -115,7 +127,7 @@ export default function RachaFacil() {
       <main className="flex-1 overflow-y-auto pb-20">
         <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6">
           {activeTab === "home" && <HomeContent userId={user.id} />}
-          {activeTab === "grupos" && <GruposContent />}
+          {activeTab === "grupos" && <GruposContent userId={user.id} />}
           {activeTab === "gastos" && <GastosContent userId={user.id} />}
         </div>
       </main>
@@ -385,57 +397,297 @@ function HomeContent({ userId }: { userId: string }) {
 }
 
 // Grupos Content Component
-function GruposContent() {
-  const [grupos, setGrupos] = useState([
-    { id: 1, nome: "Viagem Praia 🏖️", participantes: 4, total: 1280, saldo: 320, tipo: "recebe" },
-    { id: 2, nome: "República 🏠", participantes: 3, total: 540, saldo: -180, tipo: "deve" },
-  ]);
-  const [showLimitModal, setShowLimitModal] = useState(false);
+function GruposContent({ userId }: { userId: string }) {
+  const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [grupoParaExcluir, setGrupoParaExcluir] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  
+  // Estado do formulário
+  const [modoEdicao, setModoEdicao] = useState(false);
+  const [grupoEditando, setGrupoEditando] = useState<string | null>(null);
+  const [nome, setNome] = useState("");
+  const [descricao, setDescricao] = useState("");
+  const [salvando, setSalvando] = useState(false);
 
-  const MAX_GRUPOS_FREE = 2;
+  useEffect(() => {
+    carregarGrupos();
+  }, [userId]);
 
-  const handleCreateGroup = () => {
-    if (grupos.length >= MAX_GRUPOS_FREE) {
-      setShowLimitModal(true);
-    } else {
-      // Lógica para criar grupo
-      alert("Criar novo grupo");
+  const carregarGrupos = async () => {
+    try {
+      setLoading(true);
+      
+      const { data: gruposData, error } = await supabase
+        .from("Grupo")
+        .select("*")
+        .eq("usuarioCriadorId", userId)
+        .order("dataCriacao", { ascending: false });
+
+      if (error) throw error;
+
+      setGrupos(gruposData || []);
+    } catch (error) {
+      console.error("Erro ao carregar grupos:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  const handleNovoGrupo = () => {
+    setModoEdicao(false);
+    setGrupoEditando(null);
+    setNome("");
+    setDescricao("");
+    setShowModal(true);
+  };
+
+  const handleEditarGrupo = (grupo: Grupo) => {
+    setModoEdicao(true);
+    setGrupoEditando(grupo.id);
+    setNome(grupo.nome);
+    setDescricao(grupo.descricao || "");
+    setShowModal(true);
+  };
+
+  const handleSalvarGrupo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!nome.trim()) {
+      alert("Preencha o nome do grupo");
+      return;
+    }
+
+    try {
+      setSalvando(true);
+
+      if (modoEdicao && grupoEditando) {
+        // Atualizar grupo existente
+        const { error } = await supabase
+          .from("Grupo")
+          .update({
+            nome: nome.trim(),
+            descricao: descricao.trim() || null
+          })
+          .eq("id", grupoEditando)
+          .eq("usuarioCriadorId", userId);
+
+        if (error) throw error;
+
+        setSuccessMessage("Grupo atualizado com sucesso!");
+      } else {
+        // Criar novo grupo
+        const { error } = await supabase
+          .from("Grupo")
+          .insert({
+            usuarioCriadorId: userId,
+            nome: nome.trim(),
+            descricao: descricao.trim() || null
+          });
+
+        if (error) throw error;
+
+        setSuccessMessage("Grupo criado com sucesso!");
+      }
+
+      // Limpar formulário e fechar modal
+      setNome("");
+      setDescricao("");
+      setShowModal(false);
+      setModoEdicao(false);
+      setGrupoEditando(null);
+      
+      // Mostrar mensagem de sucesso
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+
+      // Recarregar lista de grupos
+      await carregarGrupos();
+    } catch (error) {
+      console.error("Erro ao salvar grupo:", error);
+      alert("Erro ao salvar grupo. Tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const handleConfirmarExclusao = (grupoId: string) => {
+    setGrupoParaExcluir(grupoId);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleExcluirGrupo = async () => {
+    if (!grupoParaExcluir) return;
+
+    try {
+      setSalvando(true);
+
+      const { error } = await supabase
+        .from("Grupo")
+        .delete()
+        .eq("id", grupoParaExcluir)
+        .eq("usuarioCriadorId", userId);
+
+      if (error) throw error;
+
+      setSuccessMessage("Grupo excluído com sucesso!");
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+
+      await carregarGrupos();
+    } catch (error) {
+      console.error("Erro ao excluir grupo:", error);
+      alert("Erro ao excluir grupo. Tente novamente.");
+    } finally {
+      setSalvando(false);
+      setShowDeleteConfirm(false);
+      setGrupoParaExcluir(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Carregando grupos...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Mensagem de Sucesso */}
+      {showSuccess && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-emerald-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2">
+          <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+            <span className="text-emerald-500 text-sm">✓</span>
+          </div>
+          {successMessage}
+        </div>
+      )}
+
       {/* Botão Criar Grupo */}
       <button 
-        onClick={handleCreateGroup}
+        onClick={handleNovoGrupo}
         className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl p-4 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 font-semibold"
       >
         <Plus className="w-5 h-5" />
         Criar novo grupo
       </button>
 
-      {/* Modal de Limite */}
-      {showLimitModal && (
+      {/* Modal de Criar/Editar Grupo */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900">
+                {modoEdicao ? "Editar Grupo" : "Novo Grupo"}
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowModal(false);
+                  setModoEdicao(false);
+                  setGrupoEditando(null);
+                  setNome("");
+                  setDescricao("");
+                }}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-all"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarGrupo} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nome do grupo *
+                </label>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  placeholder="Ex: Viagem Praia"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Descrição (opcional)
+                </label>
+                <textarea
+                  value={descricao}
+                  onChange={(e) => setDescricao(e.target.value)}
+                  placeholder="Ex: Despesas da viagem de férias"
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setModoEdicao(false);
+                    setGrupoEditando(null);
+                    setNome("");
+                    setDescricao("");
+                  }}
+                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-all"
+                  disabled={salvando}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50"
+                  disabled={salvando}
+                >
+                  {salvando ? "Salvando..." : modoEdicao ? "Atualizar" : "Criar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão */}
+      {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
             <div className="text-center mb-4">
-              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Crown className="w-8 h-8 text-amber-600" />
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-8 h-8 text-red-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Limite atingido</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Excluir grupo?</h3>
               <p className="text-gray-600">
-                Você já atingiu o limite de {MAX_GRUPOS_FREE} grupos. Considere atualizar para o plano PRO para criar mais grupos.
+                Tem certeza que deseja excluir este grupo? Esta ação não pode ser desfeita.
               </p>
             </div>
-            <div className="space-y-3">
-              <button className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all">
-                Ver planos PRO
-              </button>
-              <button 
-                onClick={() => setShowLimitModal(false)}
-                className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition-all"
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setGrupoParaExcluir(null);
+                }}
+                className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-all"
+                disabled={salvando}
               >
-                Fechar
+                Cancelar
+              </button>
+              <button
+                onClick={handleExcluirGrupo}
+                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-all disabled:opacity-50"
+                disabled={salvando}
+              >
+                {salvando ? "Excluindo..." : "Excluir"}
               </button>
             </div>
           </div>
@@ -444,52 +696,64 @@ function GruposContent() {
 
       {/* Lista de Grupos */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3 px-1">Meus grupos ({grupos.length}/{MAX_GRUPOS_FREE})</h3>
-        <div className="space-y-3">
-          {grupos.map((grupo) => (
-            <div key={grupo.id} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h4 className="text-lg font-semibold text-gray-900 mb-1">{grupo.nome}</h4>
-                  <p className="text-sm text-gray-500">{grupo.participantes} participantes</p>
-                </div>
-                <span className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-medium">
-                  Ativo
-                </span>
-              </div>
-
-              <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Total de despesas</span>
-                  <span className="font-semibold text-gray-900">R$ {grupo.total.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Seu saldo</span>
-                  <span className={`text-lg font-bold ${grupo.tipo === "recebe" ? "text-emerald-600" : "text-orange-600"}`}>
-                    {grupo.tipo === "recebe" ? "+" : "-"} R$ {Math.abs(grupo.saldo).toFixed(2)}
-                  </span>
-                </div>
-              </div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3 px-1">
+          Meus grupos ({grupos.length})
+        </h3>
+        {grupos.length === 0 ? (
+          <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Users className="w-8 h-8 text-gray-400" />
             </div>
-          ))}
-        </div>
-      </section>
+            <p className="text-gray-600 mb-2">Nenhum grupo criado</p>
+            <p className="text-sm text-gray-500">Clique em "Criar novo grupo" para começar</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {grupos.map((grupo) => (
+              <div key={grupo.id} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-1">{grupo.nome}</h4>
+                    {grupo.descricao && (
+                      <p className="text-sm text-gray-600 mb-2">{grupo.descricao}</p>
+                    )}
+                    <p className="text-xs text-gray-500">
+                      Criado em {new Date(grupo.dataCriacao).toLocaleDateString('pt-BR')}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 ml-3">
+                    <button
+                      onClick={() => handleEditarGrupo(grupo)}
+                      className="w-9 h-9 flex items-center justify-center rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all"
+                      title="Editar grupo"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleConfirmarExclusao(grupo.id)}
+                      className="w-9 h-9 flex items-center justify-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-all"
+                      title="Excluir grupo"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
 
-      {/* Plano Free Banner */}
-      <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-200">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <TrendingUp className="w-5 h-5 text-amber-600" />
+                <div className="space-y-2 pt-3 border-t border-gray-100">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Total de despesas</span>
+                    <span className="font-semibold text-gray-900">R$ 0,00</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Participantes</span>
+                    <span className="font-semibold text-gray-900">0</span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-1">Plano Free</h4>
-            <p className="text-sm text-gray-600 mb-2">Você pode criar até {MAX_GRUPOS_FREE} grupos. Upgrade para PRO e tenha grupos ilimitados!</p>
-            <button className="text-sm font-semibold text-amber-600 hover:text-amber-700">
-              Ver planos →
-            </button>
-          </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }
