@@ -33,7 +33,7 @@ export default function RachaFacil() {
 
   const checkUser = async () => {
     if (!isSupabaseConfigured) {
-      // Modo demo - redireciona para login
+      setLoading(false);
       window.location.href = "/login";
       return;
     }
@@ -42,15 +42,16 @@ export default function RachaFacil() {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
-        // Usuário não autenticado - redireciona para login
-        window.location.href = "/login";
-      } else {
-        // Usuário autenticado - mostra a página
-        setUser(user);
         setLoading(false);
+        window.location.href = "/login";
+        return;
       }
+      
+      setUser(user);
+      setLoading(false);
     } catch (error) {
       console.error("Erro ao verificar usuário:", error);
+      setLoading(false);
       window.location.href = "/login";
     }
   };
@@ -76,7 +77,16 @@ export default function RachaFacil() {
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Redirecionando...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
